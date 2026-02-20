@@ -19,6 +19,19 @@ def solve_gromov_linesearch(G, deltaG, cost_G, C1, C2, M, reg,
         else:
             nx = ot.backend.get_backend(G, deltaG, C1, C2, M)
 
+    # ensure all tensors share the same dtype when using torch backend
+    if isinstance(nx, ot.backend.TorchBackend):
+        # use dtype of G for all
+        dt = G.dtype
+        if isinstance(deltaG, torch.Tensor):
+            deltaG = deltaG.to(dt)
+        if isinstance(C1, torch.Tensor):
+            C1 = C1.to(dt)
+        if isinstance(C2, torch.Tensor):
+            C2 = C2.to(dt)
+        if isinstance(M, torch.Tensor):
+            M = M.to(dt)
+
     dot = nx.dot(nx.dot(C1, deltaG), C2.T)
     a = -2 * reg * nx.sum(dot * deltaG)
     b = nx.sum(M * deltaG) - 2 * reg * (nx.sum(dot * G) + nx.sum(nx.dot(nx.dot(C1, G), C2.T) * deltaG))
@@ -190,7 +203,15 @@ def fused_gromov_wasserstein_incent_heuristic_cg(M1, M2, C1, C2, p, q, gamma, ta
 
     def df(G):
         # Gradient of f(G)=<C1, GG^T> + <C2, G^T G> is 2*(C1G + GC2)
-        return 2 * (nx.dot(C1, G) + nx.dot(G, C2))
+        # ensure cost matrices have the same dtype as G to avoid torch errors
+        if isinstance(nx, ot.backend.TorchBackend):
+            c1 = C1.to(G.dtype)
+            c2 = C2.to(G.dtype)
+        else:
+            # numpy backend
+            c1 = C1.astype(G.dtype)
+            c2 = C2.astype(G.dtype)
+        return 2 * (nx.dot(c1, G) + nx.dot(G, c2))
     
     # armijo is default to False and loss_fun is default to square_loss
     if loss_fun == 'kl_loss':
@@ -253,7 +274,14 @@ def fused_gromov_wasserstein_incent_exact_bcd(M1, M2, C1, C2, p, q, gamma, tau=0
         old_cost_G = cost_G
         
         # Linearize GW cost (INCENT specific gradient)
-        grad_GW = 2 * (nx.dot(C1, G) + nx.dot(G, C2))
+        # ensure cost matrices and G share dtype
+        if isinstance(nx, ot.backend.TorchBackend):
+            c1 = C1.to(G.dtype)
+            c2 = C2.to(G.dtype)
+        else:
+            c1 = C1.astype(G.dtype)
+            c2 = C2.astype(G.dtype)
+        grad_GW = 2 * (nx.dot(c1, G) + nx.dot(G, c2))
         
         # Total linearized cost matrix
         C_G = M + alpha * grad_GW
@@ -306,7 +334,14 @@ def fused_gromov_wasserstein_incent_entropic(M1, M2, C1, C2, p, q, gamma, tau=0.
         old_cost_G = cost_G
         
         # Linearize GW cost (INCENT specific gradient)
-        grad_GW = 2 * (nx.dot(C1, G) + nx.dot(G, C2))
+        # ensure cost matrices and G share dtype
+        if isinstance(nx, ot.backend.TorchBackend):
+            c1 = C1.to(G.dtype)
+            c2 = C2.to(G.dtype)
+        else:
+            c1 = C1.astype(G.dtype)
+            c2 = C2.astype(G.dtype)
+        grad_GW = 2 * (nx.dot(c1, G) + nx.dot(G, c2))
         C_G = M + alpha * grad_GW
         
         # Solve entropic unbalanced linear OT
