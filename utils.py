@@ -1,17 +1,10 @@
-from typing import Any
-
-from numpy.typing import NDArray
-import ot
-import torch
-
 import numpy as np
-import scipy
-
-from ot.utils import get_backend
-from scanpy import AnnData
-
-from typing import Optional
-
+import scipy.sparse
+import torch
+import ot
+from typing import Any, Optional
+from anndata import AnnData
+from numpy.typing import NDArray
 
 def extract_data_matrix(adata: AnnData, use_rep: Optional[str] = None) -> NDArray[Any]:
     if use_rep is None:
@@ -46,5 +39,5 @@ def to_numpy(x) -> NDArray[Any]:
         return x.detach().cpu().numpy()
     elif hasattr(x, '__array__'):
         return np.array(x)
-    nx = get_backend(x)
+    nx = ot.backend.get_backend(x)
     return nx.to_numpy(x)
