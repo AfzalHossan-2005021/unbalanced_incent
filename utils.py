@@ -507,6 +507,8 @@ def cg_incent(a, b, M1, M2, reg, f, df, gamma, G0=None, line_search=line_search_
             # In purely Unbalanced OT, sum(pi) < 1. When mapping spots with spatial geometries (`pi x coord`),
             # the points mathematically scale down by the lost mass fraction. 
             # To preserve structural anatomy scales, we enforce mapping mass scalar row-normalization.
+            import ot
+            nx = ot.backend.get_backend(res)
             res_sum = nx.sum(res)
             if res_sum > 0:
                 res = res / res_sum
