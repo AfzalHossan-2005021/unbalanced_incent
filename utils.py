@@ -97,8 +97,10 @@ def fused_gromov_wasserstein_incent(M1, M2, C1, C2, p, q, gamma, G_init = None, 
         fgw_dist = log['loss'][-1]
 
         log['fgw_dist'] = fgw_dist
-        log['u'] = log['u']
-        log['v'] = log['v']
+        if 'u' in log:
+            log['u'] = log['u']
+        if 'v' in log:
+            log['v'] = log['v']
         return res, log
 
     else:
