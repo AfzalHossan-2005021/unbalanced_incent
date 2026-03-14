@@ -494,11 +494,24 @@ def cg_incent(a, b, M1, M2, reg, f, df, gamma, G0=None, line_search=line_search_
     def lp_solver(a, b, M, **kwargs):
         try:
             from ot.unbalanced import sinkhorn_unbalanced
-            # Use Entropic Unbalanced Optimal Transport for massive GPU acceleration
-            # reg: entropy regularization (keeps matrix operations differentiable and parallel)
-            # reg_m: KL marginal relaxation (allows mass creation/destruction)
-            res = sinkhorn_unbalanced(a, b, M, reg=0.01, reg_m=0.1, numItermax=1000)
-            return res, {}
+            # reg_m controls the amount of allowable mass destruction. 
+            # We explicitly align it to the user's `tau` hyperparameter (e.g. 0.1).
+            # reg controls the entropic smoothing `epsilon`.
+            # Extract epsilon and tau passed from pairwise_align (or fallback if missing)
+            eps = kwargs.get('epsilon', 0.01)
+            tau = kwargs.get('tau', 0.1)
+            
+            res, innerlog = sinkhorn_unbalanced(a, b, M, reg=eps, reg_m=tau, numItermax=1000, log=True)
+            
+            # CRITICAL FIX for UOT Geometries: 
+            # In purely Unbalanced OT, sum(pi) < 1. When mapping spots with spatial geometries (`pi x coord`),
+            # the points mathematically scale down by the lost mass fraction. 
+            # To preserve structural anatomy scales, we enforce mapping mass scalar row-normalization.
+            res_sum = nx.sum(res)
+            if res_sum > 0:
+                res = res / res_sum
+                
+            return res, innerlog
         except ImportError:
             # Fallback to standard emd
             return emd(a, b, M, numItermaxEmd, log=True)
