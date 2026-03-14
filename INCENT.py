@@ -474,8 +474,9 @@ def cosine_distance(sliceA, sliceB, sliceA_name, sliceB_name, filePath, use_rep 
         # cosine_dist_gene_expr = cosine_dist_gene_expr.cpu().detach().numpy()
 
         # use sklearn's cosine_distances
-        if torch.cuda.is_available():
+        if isinstance(s_A, torch.Tensor):
             s_A = s_A.cpu().detach().numpy()
+        if isinstance(s_B, torch.Tensor):
             s_B = s_B.cpu().detach().numpy()
         cosine_dist_gene_expr = cosine_distances(s_A, s_B)
 
