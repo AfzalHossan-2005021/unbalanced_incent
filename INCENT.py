@@ -185,11 +185,15 @@ def pairwise_align(
     _lab_A = np.asarray(sliceA.obs['cell_type_annot'].values)
     _lab_B = np.asarray(sliceB.obs['cell_type_annot'].values)
     M_celltype = (_lab_A[:, None] != _lab_B[None, :]).astype(np.float64)
-    M1_combined = (1 - beta) * cosine_dist_gene_expr + beta * M_celltype
+
+    if isinstance(cosine_dist_gene_expr, torch.Tensor):
+        M_celltype_t = torch.from_numpy(M_celltype).to(cosine_dist_gene_expr.device)
+        M1 = (1 - beta) * cosine_dist_gene_expr + beta * M_celltype_t
+    else:
+        M1_combined = (1 - beta) * cosine_dist_gene_expr + beta * M_celltype
+        M1 = nx.from_numpy(M1_combined)
+
     logFile.write(f"[cell_type_penalty] beta={beta}, M_celltype shape={M_celltype.shape}\n")
-
-
-    M1 = nx.from_numpy(M1_combined)
 
 
     # jensenshannon_divergence_backend actually returns jensen shannon distance
@@ -234,19 +238,20 @@ def pairwise_align(
         if os.path.exists(f"{filePath}/js_dist_neighborhood_{sliceA_name}_{sliceB_name}.npy") and not overwrite:
             print("Loading precomputed JSD of neighborhood distribution for slice A and slice B")
             js_dist_neighborhood = np.load(f"{filePath}/js_dist_neighborhood_{sliceA_name}_{sliceB_name}.npy")
-            
+            if use_gpu and isinstance(nx, ot.backend.TorchBackend):
+                js_dist_neighborhood = torch.from_numpy(js_dist_neighborhood).cuda()
         else:
             print("Calculating JSD of neighborhood distribution for slice A and slice B")
 
             js_dist_neighborhood = jensenshannon_divergence_backend(neighborhood_distribution_sliceA, neighborhood_distribution_sliceB)
 
-            if isinstance(js_dist_neighborhood, torch.Tensor):
-                js_dist_neighborhood = js_dist_neighborhood.detach().cpu().numpy()
-
-            # print("Saving precomputed JSD of neighborhood distribution for slice A and slice B")
-            # np.save(f"{filePath}/js_dist_neighborhood_{sliceA_name}_{sliceB_name}.npy", js_dist_neighborhood)
   
-        M2 = nx.from_numpy(js_dist_neighborhood)
+        if isinstance(js_dist_neighborhood, torch.Tensor):
+            M2 = js_dist_neighborhood
+            if use_gpu and js_dist_neighborhood.device.type != 'cuda':
+                M2 = M2.cuda()
+        else:
+            M2 = nx.from_numpy(js_dist_neighborhood)
 
     elif neighborhood_dissimilarity == 'cosine':
         if isinstance(neighborhood_distribution_sliceA, torch.Tensor) or isinstance(neighborhood_distribution_sliceB, torch.Tensor):
@@ -262,14 +267,14 @@ def pairwise_align(
             numerator = ndA @ ndB.T
             denom = ndA.norm(dim=1)[:, None] * ndB.norm(dim=1)[None, :]
             cosine_dist_neighborhood = 1 - numerator / denom
-            cosine_dist_neighborhood = cosine_dist_neighborhood.detach().cpu().numpy()
+            M2 = cosine_dist_neighborhood
         else:
             ndA = np.asarray(neighborhood_distribution_sliceA)
             ndB = np.asarray(neighborhood_distribution_sliceB)
             numerator = ndA @ ndB.T
             denom = np.linalg.norm(ndA, axis=1)[:, None] * np.linalg.norm(ndB, axis=1)[None, :]
             cosine_dist_neighborhood = 1 - numerator / denom
-        M2 = nx.from_numpy(cosine_dist_neighborhood)
+            M2 = nx.from_numpy(cosine_dist_neighborhood)
 
     elif neighborhood_dissimilarity == 'msd':
         if isinstance(neighborhood_distribution_sliceA, torch.Tensor):
@@ -291,6 +296,10 @@ def pairwise_align(
         )
 
     if isinstance(nx,ot.backend.TorchBackend) and use_gpu:
+        if not isinstance(M1, torch.Tensor):
+            M1 = nx.from_numpy(M1)
+        if not isinstance(M2, torch.Tensor):
+            M2 = nx.from_numpy(M2)
         M1 = M1.cuda()
         M2 = M2.cuda()
     
@@ -323,16 +332,25 @@ def pairwise_align(
             if use_gpu:
                 G_init = G_init.cuda()
 
-    G = np.ones((a.shape[0], b.shape[0])) / (a.shape[0] * b.shape[0])
+    G = nx.ones((a.shape[0], b.shape[0])) / (a.shape[0] * b.shape[0])
+    if use_gpu and isinstance(nx, ot.backend.TorchBackend):
+        G = G.cuda()
+
+    def _to_np(x):
+        if isinstance(x, torch.Tensor):
+            return x.detach().cpu().numpy()
+        return np.asarray(x)
+
+    G_np = _to_np(G)
 
     if neighborhood_dissimilarity == 'jsd':
-        initial_obj_neighbor = np.sum(js_dist_neighborhood*G)
+        initial_obj_neighbor = np.sum(_to_np(js_dist_neighborhood) * G_np)
     if neighborhood_dissimilarity == 'msd':
-        initial_obj_neighbor = np.sum(msd_neighborhood*G)
+        initial_obj_neighbor = np.sum(_to_np(msd_neighborhood) * G_np)
     elif neighborhood_dissimilarity == 'cosine':
-        initial_obj_neighbor = np.sum(cosine_dist_neighborhood*G)
+        initial_obj_neighbor = np.sum(_to_np(cosine_dist_neighborhood) * G_np)
 
-    initial_obj_gene = np.sum(cosine_dist_gene_expr*G)
+    initial_obj_gene = np.sum(_to_np(cosine_dist_gene_expr) * G_np)
 
     if neighborhood_dissimilarity == 'jsd':
         # print(f"Initial objective neighbor (jsd): {initial_obj_neighbor}")
@@ -359,24 +377,26 @@ def pairwise_align(
         max_indices = np.argmax(pi, axis=1)
         # multiply each value of max_indices from pi_mat with the corresponding js_dist entry
         jsd_error = np.zeros(max_indices.shape)
+        _dist_np = _to_np(js_dist_neighborhood)
         for i in range(len(max_indices)):
-            jsd_error[i] = pi[i][max_indices[i]] * js_dist_neighborhood[i][max_indices[i]]
+            jsd_error[i] = pi[i][max_indices[i]] * _dist_np[i][max_indices[i]]
 
         final_obj_neighbor = np.sum(jsd_error)
     elif neighborhood_dissimilarity == 'msd':
-        final_obj_neighbor = np.sum(msd_neighborhood*pi)
+        final_obj_neighbor = np.sum(_to_np(msd_neighborhood)*pi)
 
     elif neighborhood_dissimilarity == 'cosine':
         max_indices = np.argmax(pi, axis=1)
         # multiply each value of max_indices from pi_mat with the corresponding js_dist entry
         cos_error = np.zeros(max_indices.shape)
+        _dist_np = _to_np(cosine_dist_neighborhood)
         for i in range(len(max_indices)):
-            cos_error[i] = pi[i][max_indices[i]] * cosine_dist_neighborhood[i][max_indices[i]]
+            cos_error[i] = pi[i][max_indices[i]] * _dist_np[i][max_indices[i]]
 
         final_obj_neighbor = np.sum(cos_error)
 
 
-    final_obj_gene = np.sum(cosine_dist_gene_expr * pi)
+    final_obj_gene = np.sum(_to_np(cosine_dist_gene_expr) * pi)
 
     if neighborhood_dissimilarity == 'jsd':
         logFile.write(f"Final objective neighbor (jsd): {final_obj_neighbor}\n")
@@ -466,22 +486,21 @@ def cosine_distance(sliceA, sliceB, sliceA_name, sliceB_name, filePath, use_rep 
     if os.path.exists(fileName) and not overwrite:
         print("Loading precomputed Cosine distance of gene expression for slice A and slice B")
         cosine_dist_gene_expr = np.load(fileName)
+        if use_gpu and isinstance(nx, ot.backend.TorchBackend):
+            cosine_dist_gene_expr = torch.from_numpy(cosine_dist_gene_expr).cuda()
     else:
         print("Calculating cosine dist of gene expression for slice A and slice B")
 
-        # calculate cosine distance manually
-        # cosine_dist_gene_expr = 1 - (s_A @ s_B.T) / s_A.norm(dim=1)[:, None] / s_B.norm(dim=1)[None, :]
-        # cosine_dist_gene_expr = cosine_dist_gene_expr.cpu().detach().numpy()
-
-        # use sklearn's cosine_distances
-        if isinstance(s_A, torch.Tensor):
-            s_A = s_A.cpu().detach().numpy()
-        if isinstance(s_B, torch.Tensor):
-            s_B = s_B.cpu().detach().numpy()
-        cosine_dist_gene_expr = cosine_distances(s_A, s_B)
-
-        print("Saving cosine dist of gene expression for slice A and slice B")
-        np.save(fileName, cosine_dist_gene_expr)
+        if isinstance(s_A, torch.Tensor) and isinstance(s_B, torch.Tensor):
+            # Calculate manually using PyTorch to stay on GPU
+            s_A_norm = s_A / s_A.norm(dim=1)[:, None]
+            s_B_norm = s_B / s_B.norm(dim=1)[:, None]
+            cosine_dist_gene_expr = 1 - torch.mm(s_A_norm, s_B_norm.T)
+            np.save(fileName, cosine_dist_gene_expr.cpu().detach().numpy())
+        else:
+            from sklearn.metrics.pairwise import cosine_distances
+            cosine_dist_gene_expr = cosine_distances(s_A, s_B)
+            np.save(fileName, cosine_dist_gene_expr)
 
     return cosine_dist_gene_expr
 
