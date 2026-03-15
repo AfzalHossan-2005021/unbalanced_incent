@@ -50,7 +50,7 @@ def fused_gromov_wasserstein_incent(M1, M2, C1, C2, p, q, gamma, G_init = None, 
     p0, q0, C10, C20, M10, M20 = p, q, C1, C2, M1, M2
     nx = ot.backend.get_backend(p0, q0, C10, C20, M10, M20)
 
-    constC, hC1, hC2 = ot.gromov.init_matrix(C1, C2, p, q, loss_fun)
+    # constC, hC1, hC2 = ot.gromov.init_matrix(C1, C2, p, q, loss_fun)
 
     if G_init is None:
         G0 = p[:, None] * q[None, :]
@@ -60,10 +60,18 @@ def fused_gromov_wasserstein_incent(M1, M2, C1, C2, p, q, gamma, G_init = None, 
             G0 = G0.cuda()
 
     def f(G):
-        return ot.gromov.gwloss(constC, hC1, hC2, G)
+   
+        # print("G.shape: ", G.shape)
+        # print("C1.shape: ", C1.shape)
+        # print("C2.shape: ", C2.shape)
+        # print("G", G)
+        # print("C1", C1)
+        # print("C2", C2)
+        return nx.sum((G @ G.T)  * C1) + nx.sum((G.T @ G)  * C2)
 
     def df(G):
-        return ot.gromov.gwggrad(constC, hC1, hC2, G)
+        # Gradient of f(G)=<C1, GG^T> + <C2, G^T G> is 2*(C1G + GC2)
+        return 2 * (nx.dot(C1, G) + nx.dot(G, C2))
     
     # armijo is default to False and loss_fun is default to square_loss
     if loss_fun == 'kl_loss':
@@ -81,14 +89,6 @@ def fused_gromov_wasserstein_incent(M1, M2, C1, C2, p, q, gamma, G_init = None, 
         # we are using this line search
         def line_search(cost, G, deltaG, Mi, cost_G, **kwargs):
             return solve_gromov_linesearch(G, deltaG, cost_G, C1, C2, M=M_linear, reg=alpha, nx=nx, **kwargs)
-    
-    module_path = inspect.getfile(ot)
-
-    # Get the directory containing the module
-    module_directory = os.path.dirname(module_path)
-
-    # print(f"Module path: {module_path}")
-    # print(f"Module directory: {module_directory}")
 
     if log:
 
