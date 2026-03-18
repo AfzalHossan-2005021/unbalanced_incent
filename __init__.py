@@ -1,2 +1,28 @@
-from .smart_align import smart_pairwise_align as pairwise_align
-from .INCENT import neighborhood_distribution, cosine_distance
+"""
+__init__.py — INCENT package
+"""
+from .core import (
+    pairwise_align,
+    pairwise_align_unbalanced,
+    neighborhood_distribution,
+    cosine_distance,
+)
+from .utils import (
+    fused_gromov_wasserstein_incent,
+    jensenshannon_divergence_backend,
+    pairwise_msd,
+    to_dense_array,
+    extract_data_matrix,
+)
+
+__all__ = [
+    'pairwise_align',
+    'pairwise_align_unbalanced',
+    'neighborhood_distribution',
+    'cosine_distance',
+    'fused_gromov_wasserstein_incent',
+    'jensenshannon_divergence_backend',
+    'pairwise_msd',
+    'to_dense_array',
+    'extract_data_matrix',
+]

@@ -7,7 +7,7 @@ from sklearn.neighbors import kneighbors_graph
 from sklearn.metrics import silhouette_score
 from scipy.spatial.distance import cdist
 import itertools
-from .INCENT import pairwise_align
+from .core import pairwise_align
 
 class AlignmentConfig:
     """
