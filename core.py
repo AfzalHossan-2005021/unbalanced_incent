@@ -77,7 +77,7 @@ def neighborhood_distribution(curr_slice: AnnData, radius: float) -> np.ndarray:
 
 def cosine_distance(sliceA, sliceB, sliceA_name, sliceB_name,
                     filePath, use_rep=None, use_gpu=False,
-                    nx=ot.backend.NumpyBackend(), beta=0.8, overwrite=False):
+                    nx=ot.backend.NumpyBackend(), overwrite=False):
     """Pairwise cosine distance on gene expression. Results cached to filePath."""
     A_X = nx.from_numpy(to_dense_array(extract_data_matrix(sliceA, use_rep)))
     B_X = nx.from_numpy(to_dense_array(extract_data_matrix(sliceB, use_rep)))
@@ -193,14 +193,13 @@ def _preprocess(
     D_A = ot.dist(coordsA, coordsA, metric='euclidean')
     D_B = ot.dist(coordsB, coordsB, metric='euclidean')
 
-    # Normalize each distance matrix by its own minimum non-zero value
-    min_nonzero_A = nx.min(D_A[D_A > 0])
-    min_nonzero_B = nx.min(D_B[D_B > 0])
-    D_A = D_A / min_nonzero_A
-    D_B = D_B / min_nonzero_B
+    # Normalize each distance matrix by the maximum value across both, preserving the true size relationship so GW embeds A as a spatial subregion of B.
+    scale = max(float(nx.max(D_A)), float(nx.max(D_B)))
+    D_A = D_A / scale
+    D_B = D_B / scale
 
     # Get max for logging
-    logFile.write(f"Normalized by min non-zero: D_A max={float(nx.max(D_A)):.6f}, D_B max={float(nx.max(D_B)):.6f}\n")
+    logFile.write(f"Normalized by max: D_A max={float(nx.max(D_A)):.6f}, D_B max={float(nx.max(D_B)):.6f}\n")
 
     if use_gpu and isinstance(nx, ot.backend.TorchBackend):
         D_A = D_A.cuda()
@@ -209,7 +208,7 @@ def _preprocess(
     # ── Gene-expression cost ───────────────────────────────────────────────────
     cosine_dist_gene_expr = cosine_distance(
         sliceA, sliceB, sliceA_name, sliceB_name, filePath,
-        use_rep=use_rep, use_gpu=use_gpu, nx=nx, beta=beta, overwrite=overwrite)
+        use_rep=use_rep, use_gpu=use_gpu, nx=nx, overwrite=overwrite)
 
     # ── Cell-type mismatch penalty ─────────────────────────────────────────────
     lab_A = np.asarray(sliceA.obs['cell_type_annot'].values)
