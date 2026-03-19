@@ -125,6 +125,18 @@ def _to_np(x):
     return np.asarray(x, dtype=np.float64)
 
 
+def _hard_assignment_from_coupling(pi: np.ndarray) -> np.ndarray:
+    """Project a soft coupling to a hard one-to-one assignment matrix."""
+    from scipy.optimize import linear_sum_assignment
+
+    pi_np = np.asarray(pi, dtype=np.float64)
+    row_ind, col_ind = linear_sum_assignment(-pi_np)
+
+    hard_pi = np.zeros_like(pi_np, dtype=np.float64)
+    hard_pi[row_ind, col_ind] = 1.0
+    return hard_pi
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Private preprocessing helper — shared by both align functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -376,6 +388,7 @@ def pairwise_align(
     sliceB_name: Optional[str] = None,
     overwrite: bool            = False,
     neighborhood_dissimilarity: str = 'jsd',
+    hard_assignment: bool      = False,
     **kwargs,
 ) -> Union[NDArray[np.floating],
            Tuple[NDArray[np.floating], float, float, float, float]]:
@@ -447,6 +460,9 @@ def pairwise_align(
     )
     pi = nx.to_numpy(pi)
 
+    if hard_assignment:
+        pi = _hard_assignment_from_coupling(pi)
+
     # Final objective logging
     final_nb = 0.0
     if p['nd_dissim'] == 'jsd':
@@ -483,7 +499,7 @@ def pairwise_align_unbalanced(
     filePath:  str,
     # ── new FUGW parameters ───────────────────────────────────────────────────
     reg_marginals:     float = 1.0,
-    epsilon:           float = 0.0,
+    epsilon:     int | float = 0,
     divergence:        str   = 'kl',
     unbalanced_solver: str   = 'mm',
     max_iter:          int   = 100,
@@ -506,6 +522,7 @@ def pairwise_align_unbalanced(
     sliceB_name: Optional[str] = None,
     overwrite: bool            = False,
     neighborhood_dissimilarity: str = 'jsd',
+    hard_assignment: bool      = False,
     **kwargs,
 ) -> Union[NDArray[np.floating],
            Tuple[NDArray[np.floating], float, float, float, float]]:
@@ -681,6 +698,9 @@ def pairwise_align_unbalanced(
     )
 
     pi = np.asarray(pi_samp, dtype=np.float64)
+
+    if hard_assignment:
+        pi = _hard_assignment_from_coupling(pi)
 
     # ── Log ───────────────────────────────────────────────────────────────────
     linear_cost = float(log_dict.get('linear_cost', 0.0))
