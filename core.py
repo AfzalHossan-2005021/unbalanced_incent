@@ -199,9 +199,8 @@ def _preprocess(
     D_A = D_A / min_nonzero_A
     D_B = D_B / min_nonzero_B
 
-    logFile.write(f"Shared-scale normalisation: scale={float(scale):.4f}\n")
-    logFile.write(f"D_A max={float(nx.max(D_A)):.6f}   "
-                  f"D_B max={float(nx.max(D_B)):.6f}\n\n")
+    # Get max for logging
+    logFile.write(f"Normalized by min non-zero: D_A max={float(nx.max(D_A)):.6f}, D_B max={float(nx.max(D_B)):.6f}\n")
 
     if use_gpu and isinstance(nx, ot.backend.TorchBackend):
         D_A = D_A.cuda()
