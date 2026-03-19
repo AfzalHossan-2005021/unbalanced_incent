@@ -14,6 +14,7 @@ from .utils import (
     to_dense_array,
     extract_data_matrix,
 )
+from .incent_rg import incent_rg
 
 __all__ = [
     'pairwise_align',
@@ -25,4 +26,5 @@ __all__ = [
     'pairwise_msd',
     'to_dense_array',
     'extract_data_matrix',
+    'incent_rg'
 ]
