@@ -193,21 +193,11 @@ def _preprocess(
     D_A = ot.dist(coordsA, coordsA, metric='euclidean')
     D_B = ot.dist(coordsB, coordsB, metric='euclidean')
 
-    # ── ★ Shared-scale normalisation (the critical fix) ★ ─────────────────────
-    #
-    # Both matrices divided by max(D_B).
-    #   D_B → [0, 1.0]
-    #   D_A → [0, diameter_A / diameter_B]  < 1 for partial slices
-    #
-    # GW embeds A as a spatial *subregion* of B.
-    # Old independent normalisation made both span [0,1] → mixing.
-    #
-    scale = nx.max(D_B)
-    if float(scale) < 1e-12:
-        raise ValueError("D_B is all zeros — check spatial coordinates.")
-
-    D_A = D_A / scale
-    D_B = D_B / scale
+    # Normalize each distance matrix by its own minimum non-zero value
+    min_nonzero_A = nx.min(D_A[D_A > 0])
+    min_nonzero_B = nx.min(D_B[D_B > 0])
+    D_A = D_A / min_nonzero_A
+    D_B = D_B / min_nonzero_B
 
     logFile.write(f"Shared-scale normalisation: scale={float(scale):.4f}\n")
     logFile.write(f"D_A max={float(nx.max(D_A)):.6f}   "
@@ -512,7 +502,7 @@ def pairwise_align_unbalanced(
     neighborhood_dissimilarity: str = 'jsd',
     **kwargs,
 ) -> Union[NDArray[np.floating],
-           Tuple[NDArray[np.floating], float, float]]:
+           Tuple[NDArray[np.floating], float, float, float, float]]:
     """
     Unbalanced Fused Gromov-Wasserstein alignment.
 
@@ -572,7 +562,7 @@ def pairwise_align_unbalanced(
           Rows no longer sum to 1/n_A for unmatched cells (mass is "destroyed").
           pi.sum() < 1 indicates partial overlap was detected.
 
-    If return_obj=True: (pi, linear_cost, fugw_cost)
+    If return_obj=True: (pi, init_nb, init_gene, final_nb, final_gene)
     """
     start = time.time()
     os.makedirs(filePath, exist_ok=True)
@@ -605,6 +595,17 @@ def pairwise_align_unbalanced(
     D_B    = p['D_B']
     a      = p['a']
     b      = p['b']
+
+    # Initial objective logging
+    G0_np = np.ones((sliceA.shape[0], sliceB.shape[0])) / (
+        sliceA.shape[0] * sliceB.shape[0])
+
+    init_nb = 0.0
+    if p['nd_dissim'] == 'jsd':
+        init_nb = float(np.sum(_to_np(M2) * G0_np))
+        logFile.write(f"Initial obj neighbour (jsd): {init_nb:.6f}\n")
+    init_gene = float(np.sum(_to_np(p['cosine_dist_gene_expr']) * G0_np))
+    logFile.write(f"Initial obj gene (cosine):    {init_gene:.6f}\n\n")
 
     # ── Convert to numpy float64 for FUGW ─────────────────────────────────────
     # ot.gromov.fused_unbalanced_gromov_wasserstein accepts any POT-backend
@@ -680,6 +681,18 @@ def pairwise_align_unbalanced(
     fugw_cost   = float(log_dict.get('fugw_cost',   0.0))
     pi_mass     = float(pi.sum())
 
+    # Final objective logging
+    final_nb = 0.0
+    if p['nd_dissim'] == 'jsd':
+        max_idx  = np.argmax(pi, axis=1)
+        jsd_np   = _to_np(M2)
+        final_nb = float(sum(pi[i, max_idx[i]] * jsd_np[i, max_idx[i]]
+                             for i in range(len(max_idx))))
+        logFile.write(f"Final obj neighbour (jsd): {final_nb:.6f}\n")
+
+    final_gene = float(np.sum(_to_np(p['cosine_dist_gene_expr']) * pi))
+    logFile.write(f"Final obj gene (cosine):   {final_gene:.6f}\n")
+
     logFile.write(f"FUGW linear cost: {linear_cost:.6f}\n")
     logFile.write(f"FUGW total cost:  {fugw_cost:.6f}\n")
     logFile.write(f"pi mass:          {pi_mass:.6f}  "
@@ -694,5 +707,5 @@ def pairwise_align_unbalanced(
           f"linear_cost={linear_cost:.4f}  fugw_cost={fugw_cost:.4f}")
 
     if return_obj:
-        return pi, linear_cost, fugw_cost
+        return pi, init_nb, init_gene, final_nb, final_gene
     return pi
