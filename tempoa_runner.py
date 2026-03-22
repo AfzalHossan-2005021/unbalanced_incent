@@ -2,10 +2,10 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import get_neighborhood_distribution, jensenshannon_divergence_backend, cosine_dist_calculator
+from .utils import get_neighborhood_distribution, jensenshannon_divergence_backend, cosine_dist_calculator
 
 # Assuming tempoa modules are in the same directory or accessible in PYTHONPATH
-from tempoa_solver import run_tempoa as execute_tempoa
+from .tempoa_solver import run_tempoa as execute_tempoa
 
 def run_tempoa(sliceA, sliceB, data1, data2, dataPath, overwrite=False):
     """
