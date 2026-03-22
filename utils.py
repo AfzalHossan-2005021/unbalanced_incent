@@ -5,15 +5,16 @@ Unchanged from original except minor clarity improvements.
 All FGW / conditional gradient logic is preserved exactly.
 """
 
+import os
 import numpy as np
+import pandas as pd
 import scipy.sparse as sp
 import torch
 import ot
 
 from tqdm import tqdm
-from ot.optim import line_search_armijo
-from ot.utils import list_to_array, get_backend
-from ot.unbalanced import sinkhorn_unbalanced
+from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.metrics.pairwise import cosine_distances
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -94,235 +95,100 @@ def pairwise_msd(A, B):
     return np.mean(diff ** 2, axis=2)                  # (m, n)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Gromov line search
-# ═════════════════════════════════════════════════════════════════════════════
-
-def solve_gromov_linesearch(G, deltaG, cost_G, C1, C2, M, reg,
-                             alpha_min=None, alpha_max=None, nx=None, **kwargs):
+def get_neighborhood_distribution(curr_slice, radius):
     """
-    Exact quadratic line search for the FW step in FGW.
-    Reference: Vayer et al., ICML 2019.
+    This method is added by Anup Bhowmik
+    Args:
+        curr_slice: Slice to get niche distribution for.
+        pairwise_distances: Pairwise distances between cells of a slice.
+        radius: Radius of the niche.
+
+    Returns:
+        niche_distribution: Niche distribution for the slice.
     """
-    if nx is None:
-        G, deltaG, C1, C2, M = ot.utils.list_to_array(G, deltaG, C1, C2, M)
-        nx = ot.backend.get_backend(G, deltaG, C1, C2, M)
 
-    dot = nx.dot(nx.dot(C1, deltaG), C2.T)
-    a   = -2.0 * reg * nx.sum(dot * deltaG)
-    b   = (nx.sum(M * deltaG)
-           - 2.0 * reg * (nx.sum(dot * G)
-                          + nx.sum(nx.dot(nx.dot(C1, G), C2.T) * deltaG)))
+    # print ("radius", radius)
 
-    alpha = ot.optim.solve_1d_linesearch_quad(a, b)
-    if alpha_min is not None or alpha_max is not None:
-        alpha = np.clip(alpha, alpha_min, alpha_max)
+    unique_cell_types = np.array(list(curr_slice.obs['cell_type_annot'].unique()))
+    cell_type_to_index = dict(zip(unique_cell_types, list(range(len(unique_cell_types)))))
+    cells_within_radius = np.zeros((curr_slice.shape[0], len(unique_cell_types)), dtype=float)
 
-    cost_G = cost_G + a * alpha ** 2 + b * alpha
-    return alpha, 1, cost_G
+    # print("time taken for cell type", time_cell_type_end-time_cell_type_start)
 
+    source_coords = curr_slice.obsm['spatial']
+    distances = euclidean_distances(source_coords, source_coords)
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Generic conditional gradient
-# ═════════════════════════════════════════════════════════════════════════════
+    for i in tqdm(range(curr_slice.shape[0])):
+        # find the indices of the cells within the radius
 
-def generic_conditional_gradient_incent(
-        a, b, M1, M2, f, df, reg1, reg2,
-        lp_solver, line_search, gamma,
-        G0=None, numItermax=6000,
-        stopThr=1e-9, stopThr2=1e-9,
-        verbose=False, log=False, **kwargs):
-    """
-    Generalised conditional gradient for the (F)GW problem with two
-    linear cost terms M1 and M2.
+        target_indices = np.where(distances[i] <= radius)[0]
+        # print("i", i)
+        # print(target_indices)
 
-    Objective:
-        min_G  <M1 + gamma*M2, G> + reg1 * f(G)
-        s.t.   G 1 = a,  G^T 1 = b,  G >= 0
-    """
-    a, b, M1, M2, G0 = list_to_array(a, b, M1, M2, G0)
-    nx = get_backend(a, b, M1) if not (isinstance(M1, (int, float))) \
-        else get_backend(a, b)
+        for ind in target_indices:
+            cell_type_str_j = str(curr_slice.obs['cell_type_annot'][ind])
+            cells_within_radius[i][cell_type_to_index[cell_type_str_j]] += 1
 
-    if log:
-        log_dict = {'loss': []}
+    return np.array(cells_within_radius)
 
-    # Initialise transport plan
-    if G0 is None:
-        G = nx.ones((a.shape[0], b.shape[0])) / (a.shape[0] * b.shape[0])
+def cosine_dist_calculator(sliceA, sliceB, sliceA_name, sliceB_name, filePath, use_rep = None, use_gpu = False, nx = ot.backend.NumpyBackend(), beta = 0.8, overwrite = False):
+    A_X, B_X = nx.from_numpy(to_dense_array(extract_data_matrix(sliceA,use_rep))), nx.from_numpy(to_dense_array(extract_data_matrix(sliceB,use_rep)))
+
+    if isinstance(nx,ot.backend.TorchBackend) and use_gpu:
+        A_X = A_X.cuda()
+        B_X = B_X.cuda()
+
+   
+    s_A = A_X + 0.01
+    s_B = B_X + 0.01
+
+    
+    one_hot_cell_type_sliceA = pd.get_dummies(sliceA.obs['cell_type_annot'])
+    # print ("one_hot_cell_type_sliceA type: ", type(one_hot_cell_type_sliceA))
+    one_hot_cell_type_sliceA = one_hot_cell_type_sliceA.to_numpy()
+
+    one_hot_cell_type_sliceB = pd.get_dummies(sliceB.obs['cell_type_annot'])
+    one_hot_cell_type_sliceB = one_hot_cell_type_sliceB.to_numpy()
+
+    if isinstance(nx,ot.backend.TorchBackend):
+        s_A = s_A.cpu().detach().numpy()
+        s_B = s_B.cpu().detach().numpy()
+
+    # Concatenate along a specified axis (0 for rows, 1 for columns)
+    s_A = np.concatenate((s_A, beta * one_hot_cell_type_sliceA), axis=1)
+    s_B = np.concatenate((s_B, beta * one_hot_cell_type_sliceB), axis=1)
+
+    s_A = torch.from_numpy(s_A)
+    s_B = torch.from_numpy(s_B)
+
+    if torch.cuda.is_available():
+        print("CUDA is available on your system.")
+        s_A = s_A.to('cuda')
+        s_B = s_B.to('cuda')
+
     else:
-        G = nx.copy(G0)
+        print("CUDA is not available on your system.")
 
-    M_linear = kwargs.pop('M_linear', M1 + gamma * M2)
-
-    def cost(G):
-        return nx.sum(M1 * G) + gamma * nx.sum(M2 * G) + reg1 * f(G)
-
-    cost_G = cost(G)
-    if log:
-        log_dict['loss'].append(cost_G)
-
-    it   = 0
-    loop = True
-
-    if verbose:
-        hdr = '{:5s}|{:12s}|{:8s}|{:8s}'.format(
-            'It.', 'Loss', 'Rel. loss', 'Abs. loss')
-        print(hdr + '\n' + '-' * 48)
-        print(f'{it:5d}|{float(cost_G):8e}|{"":8s}|{"":8s}')
-
-    while loop:
-        it += 1
-        old_cost_G = cost_G
-
-        # Linearise: gradient direction
-        Mi = M1 + gamma * M2 + reg1 * df(G)
-        if reg2 is not None:
-            Mi = Mi + reg2 * (1.0 + nx.log(G))
-        Mi = Mi + nx.min(Mi)      # shift non-negative
-
-        # Frank-Wolfe sub-problem
-        Gc, innerlog_ = lp_solver(a, b, Mi, **kwargs)
-
-        # Line search
-        deltaG = Gc - G
-        alpha, _, cost_G = line_search(cost, G, deltaG, Mi, cost_G, **kwargs)
-        G = G + alpha * deltaG
-
-        # Convergence checks
-        abs_delta  = abs(cost_G - old_cost_G)
-        rel_delta  = abs_delta / (abs(cost_G) + 1e-12)
-
-        if it >= numItermax:
-            loop = False
-        if rel_delta < stopThr or abs_delta < stopThr2:
-            loop = False
-
-        if log:
-            log_dict['loss'].append(cost_G)
-
-        if verbose and it % 20 == 0:
-            print(hdr + '\n' + '-' * 48)
-            print(f'{it:5d}|{float(cost_G):8e}|{rel_delta:8e}|{abs_delta:8e}')
-
-    if log:
-        log_dict.update(innerlog_)
-        return G, log_dict
-    return G
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# CG with unbalanced inner solver
-# ═════════════════════════════════════════════════════════════════════════════
-
-def cg_incent(a, b, M1, M2, reg, f, df, gamma,
-              G0=None, line_search=line_search_armijo,
-              numItermax=6000, numItermaxEmd=100000,
-              stopThr=1e-9, stopThr2=1e-9,
-              verbose=False, log=False, **kwargs):
-    """
-    Conditional gradient with Sinkhorn-unbalanced inner LP solver.
-    """
-    def lp_solver(a, b, M, **kwargs):
-        eps = kwargs.get('epsilon', 0.01)
-        tau = kwargs.get('tau',     0.1)
-        res, innerlog = sinkhorn_unbalanced(
-            a, b, M, reg=eps, reg_m=tau,
-            numItermax=numItermax, log=True)
-        # Re-normalise to keep transport plan as a probability coupling
-        nx_  = ot.backend.get_backend(res)
-        s    = nx_.sum(res)
-        if s > 0:
-            res = res / s
-        return res, innerlog
-
-    return generic_conditional_gradient_incent(
-        a, b, M1, M2, f, df, reg, None,
-        lp_solver, line_search,
-        G0=G0, gamma=gamma,
-        numItermax=numItermax,
-        stopThr=stopThr, stopThr2=stopThr2,
-        verbose=verbose, log=log, **kwargs)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Fused Gromov-Wasserstein (entry point called from core.py)
-# ═════════════════════════════════════════════════════════════════════════════
-
-def fused_gromov_wasserstein_incent(
-        M1, M2, C1, C2, p, q, gamma,
-        G_init=None, loss_fun='square_loss',
-        alpha=0.1, armijo=False, log=False,
-        numItermax=6000, tol_rel=1e-9, tol_abs=1e-9,
-        use_gpu=False, **kwargs):
-    """
-    FGW objective:
-        min_pi  (1-alpha)*[<M1,pi> + gamma*<M2,pi>] + alpha * GW(C1,C2,pi)
-
-    Parameters
-    ----------
-    M1  : (n_A, n_B) linear cost — gene expression + cell-type penalty
-    M2  : (n_A, n_B) linear cost — neighbourhood dissimilarity
-    C1  : (n_A, n_A) spatial distance matrix of slice A (shared-scale normalised)
-    C2  : (n_B, n_B) spatial distance matrix of slice B (shared-scale normalised)
-    p   : (n_A,) marginal for A
-    q   : (n_B,) marginal for B
-    gamma  : weight of M2 relative to M1 inside the linear term
-    alpha  : weight of GW term (0 = pure biology, 1 = pure spatial)
-    """
-    p, q = list_to_array(p, q)
-    p0, q0, C10, C20, M10, M20 = p, q, C1, C2, M1, M2
-    nx   = get_backend(p0, q0, C10, C20, M10, M20)
-
-    if G_init is None:
-        G0 = p[:, None] * q[None, :]
+    fileName = f"{filePath}/cosine_dist_gene_expr_{sliceA_name}_{sliceB_name}.npy"
+    
+    if os.path.exists(fileName) and not overwrite:
+        print("Loading precomputed Cosine distance of gene expression for slice A and slice B")
+        cosine_dist_gene_expr = np.load(fileName)
     else:
-        s  = nx.sum(G_init)
-        G0 = G_init / (s if s > 0 else 1.0)
-        if use_gpu:
-            G0 = G0.cuda()
+        print("Calculating cosine dist of gene expression for slice A and slice B")
 
-    # GW regularisation functions (square loss)
-    def f(G):
-        return nx.sum((G @ G.T) * C1) + nx.sum((G.T @ G) * C2)
+        # calculate cosine distance manually
+        # cosine_dist_gene_expr = 1 - (s_A @ s_B.T) / s_A.norm(dim=1)[:, None] / s_B.norm(dim=1)[None, :]
+        # cosine_dist_gene_expr = cosine_dist_gene_expr.cpu().detach().numpy()
 
-    def df(G):
-        return 2.0 * (nx.dot(C1, G) + nx.dot(G, C2))
+        # use sklearn's cosine_distances
+        if torch.cuda.is_available():
+            s_A = s_A.cpu().detach().numpy()
+            s_B = s_B.cpu().detach().numpy()
+        cosine_dist_gene_expr = cosine_distances(s_A, s_B)
 
-    if loss_fun == 'kl_loss':
-        armijo = True   # no closed-form line search for KL
+        print("Saving cosine dist of gene expression for slice A and slice B")
+        np.save(fileName, cosine_dist_gene_expr)
 
-    # Pre-compute full linear cost for the GW line search
-    M_linear = (1.0 - alpha) * M1 + gamma * (1.0 - alpha) * M2
+    return cosine_dist_gene_expr
 
-    if armijo:
-        def line_search(cost, G, deltaG, Mi, cost_G, **kw):
-            return ot.optim.line_search_armijo(cost, G, deltaG, Mi, cost_G,
-                                               nx=nx, **kw)
-    else:
-        def line_search(cost, G, deltaG, Mi, cost_G, **kw):
-            return solve_gromov_linesearch(
-                G, deltaG, cost_G, C1, C2, M=M_linear, reg=alpha, nx=nx, **kw)
-
-    if log:
-        res, log_out = cg_incent(
-            p, q,
-            (1.0 - alpha) * M1,
-            (1.0 - alpha) * M2,
-            alpha, f, df, gamma=gamma,
-            G0=G0, line_search=line_search, log=True,
-            numItermax=numItermax,
-            stopThr=tol_rel, stopThr2=tol_abs,
-            M_linear=M_linear, **kwargs)
-        log_out['fgw_dist'] = log_out['loss'][-1]
-        return res, log_out
-    else:
-        return cg_incent(
-            p, q,
-            (1.0 - alpha) * M1,
-            (1.0 - alpha) * M2,
-            alpha, f, df, gamma=gamma,
-            G0=G0, line_search=line_search, log=True,
-            numItermax=numItermax,
-            stopThr=tol_rel, stopThr2=tol_abs,
-            M_linear=M_linear, **kwargs)
