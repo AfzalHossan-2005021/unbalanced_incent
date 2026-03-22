@@ -1,6 +1,6 @@
 import numpy as np
 from sklearn.neighbors import BallTree
-from utils import jensenshannon_divergence_backend
+from .utils import jensenshannon_divergence_backend
 
 def compute_ctnd(adata, radius, spatial_key='spatial', ct_key='cell_type_annot'):
     """
