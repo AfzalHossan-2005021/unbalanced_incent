@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
-from ot.unbalanced import fused_unbalanced_gromov_wasserstein
+from ot.gromov import fused_unbalanced_gromov_wasserstein
 
 from .tempoa_features import tempoa_temporal_cost
 from .tempoa_cpd import tempoa_prior_matrix, compute_diffeomorphic_masked_cost
