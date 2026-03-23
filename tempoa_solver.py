@@ -68,6 +68,8 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
         p=p, 
         q=q, 
         loss_type='L2', 
+        divergence="kl",
+        unbalanced_solver="sinkhorn",
         alpha=alpha, 
         epsilon=margin_s,  # KL mass relaxation S
         epsilon2=margin_t, # KL mass relaxation T (highly relaxed for massive target slices)
