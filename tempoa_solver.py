@@ -63,8 +63,8 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
     # and the unbalanced relaxation, restricting drastic cross-edges.
     pi, log = fused_unbalanced_gromov_wasserstein(
         M=M_tilde, 
-        C1=D_S, 
-        C2=D_T, 
+        Cx=D_S, 
+        Cy=D_T, 
         p=p, 
         q=q, 
         loss_type='L2', 
