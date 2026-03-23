@@ -63,9 +63,11 @@ def tempoa_temporal_cost(adata_s, adata_t, radius=50.0):
                 idx = np.where(cts == ct)[0][0]
                 aligned[:, i] = ctnd[:, idx]
         return aligned
+    
+    eps = 1e-5
         
-    ctnd_s_aligned = align_ctnd(curr_ctnd_s, cts_s, all_cts)
-    ctnd_t_aligned = align_ctnd(curr_ctnd_t, cts_t, all_cts)
+    ctnd_s_aligned = align_ctnd(curr_ctnd_s, cts_s, all_cts) + eps
+    ctnd_t_aligned = align_ctnd(curr_ctnd_t, cts_t, all_cts) + eps
     
     # Calculate JSD as the cost matrix M
     print("Computing CTND JSD Matrix M...")
