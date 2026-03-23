@@ -37,8 +37,9 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
     D_S = pairwise_msd(coords_s, coords_s)
     D_T = pairwise_msd(coords_t, coords_t)
     
-    # Normalize by max of target to maintain shared scale (as per original core.py fix for partial maps)
-    max_scale = np.max(D_T)
+    # Normalize both by the global maximum spatial distance to explicitly maintain the specific 
+    # true structural size parity (preventing smaller slices from stretching aggressively natively)
+    max_scale = max(D_S.max(), D_T.max()) + 1e-8
     D_S = D_S / max_scale
     D_T = D_T / max_scale
     
@@ -54,9 +55,6 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
     
     # Scale down distance matrices to prevent exponential overflow in solvers
     M_tilde_scaled = M_tilde / (np.max(M_tilde) + 1e-8)
-    D_scale = max(D_S.max(), D_T.max()) + 1e-8
-    D_S_scaled = D_S / D_scale
-    D_T_scaled = D_T / D_scale
 
     # 4. Uniform marginal distributions
     p = np.ones(M_tilde.shape[0]) / M_tilde.shape[0]
@@ -68,8 +66,8 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
     # Note: LDDMM Laplacian penalty is mathematically encoded via the structured prior
     # and the unbalanced relaxation, restricting drastic cross-edges.
     pi, pi2, log_dict = fused_unbalanced_gromov_wasserstein(
-        Cx=D_S_scaled, 
-        Cy=D_T_scaled,
+        Cx=D_S, 
+        Cy=D_T,
         wx=p,
         wy=q,
         M=M_tilde_scaled, 
