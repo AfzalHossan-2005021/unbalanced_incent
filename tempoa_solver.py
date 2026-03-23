@@ -52,6 +52,12 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
     # Calculate M_tilde
     M_tilde = compute_diffeomorphic_masked_cost(M_temporal, P_prior, gamma_penalty=2.0)
     
+    # Scale down distance matrices to prevent exponential overflow in solvers
+    M_tilde_scaled = M_tilde / (np.max(M_tilde) + 1e-8)
+    D_scale = max(D_S.max(), D_T.max()) + 1e-8
+    D_S_scaled = D_S / D_scale
+    D_T_scaled = D_T / D_scale
+
     # 4. Uniform marginal distributions
     p = np.ones(M_tilde.shape[0]) / M_tilde.shape[0]
     q = np.ones(M_tilde.shape[1]) / M_tilde.shape[1]
@@ -62,16 +68,16 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
     # Note: LDDMM Laplacian penalty is mathematically encoded via the structured prior
     # and the unbalanced relaxation, restricting drastic cross-edges.
     pi, pi2, log_dict = fused_unbalanced_gromov_wasserstein(
-        Cx=D_S, 
-        Cy=D_T,
+        Cx=D_S_scaled, 
+        Cy=D_T_scaled,
         wx=p,
         wy=q,
-        M=M_tilde, 
+        M=M_tilde_scaled, 
         alpha=alpha,
         reg_marginals=(margin_s, margin_t),
-        epsilon=0.01, # Entropy regularization
+        epsilon=0.1, # Increased epsilon helps stabilize large-scale matrices
         divergence='kl',
-        unbalanced_solver='lbfgsb', # Use a more stable solver for unbalanced optimization
+        unbalanced_solver='lbfgsb', # Scipy's LBFGSB uses the gradient directly, circumventing exponential underflow entirely
         log=True, 
         max_iter=50,
         tol=1e-5
