@@ -71,7 +71,7 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
         reg_marginals=(margin_s, margin_t),
         epsilon=0.01, # Entropy regularization
         divergence='kl',
-        unbalanced_solver='sinkhorn_log', # log-domain sinkhorn avoids numerical overflow and is highly memory efficient
+        unbalanced_solver='lbfgsb', # Use a more stable solver for unbalanced optimization
         log=True, 
         max_iter=50,
         tol=1e-5
