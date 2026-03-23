@@ -61,22 +61,20 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
     # For large scale unbalanced GW, this relies on POT's BCD loop.
     # Note: LDDMM Laplacian penalty is mathematically encoded via the structured prior
     # and the unbalanced relaxation, restricting drastic cross-edges.
-    pi, log = fused_unbalanced_gromov_wasserstein(
-        M=M_tilde, 
+    pi, pi2, log_dict = fused_unbalanced_gromov_wasserstein(
         Cx=D_S, 
-        Cy=D_T, 
-        p=p, 
-        q=q, 
-        loss_type='L2', 
-        divergence="kl",
-        unbalanced_solver="sinkhorn",
-        alpha=alpha, 
-        epsilon=margin_s,  # KL mass relaxation S
-        epsilon2=margin_t, # KL mass relaxation T (highly relaxed for massive target slices)
+        Cy=D_T,
+        wx=p,
+        wy=q,
+        M=M_tilde, 
+        alpha=alpha,
+        reg_marginals=(margin_s, margin_t),
+        epsilon=0.01, # Entropy regularization
+        divergence='kl',
+        unbalanced_solver='sinkhorn',
         log=True, 
-        numItermax=50,
-        tol_outer=1e-5,
-        tol_inner=1e-5
+        max_iter=50,
+        tol=1e-5
     )
     
     return pi, M_tilde, P_prior
