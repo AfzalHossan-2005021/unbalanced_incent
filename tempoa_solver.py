@@ -2,9 +2,9 @@ import numpy as np
 import scipy.sparse as sp
 from ot.gromov import fused_unbalanced_gromov_wasserstein
 
+from .utils import pairwise_msd
 from .tempoa_features import tempoa_temporal_cost
 from .tempoa_cpd import tempoa_prior_matrix, compute_diffeomorphic_masked_cost
-from .utils import pairwise_msd
 
 def build_diffeomorphic_laplacian(coords, k=10):
     """
@@ -71,7 +71,7 @@ def run_tempoa(slice_s, slice_t, alpha=0.5, margin_s=0.1, margin_t=0.01,
         reg_marginals=(margin_s, margin_t),
         epsilon=0.01, # Entropy regularization
         divergence='kl',
-        unbalanced_solver='sinkhorn',
+        unbalanced_solver='sinkhorn_log', # log-domain sinkhorn avoids numerical overflow and is highly memory efficient
         log=True, 
         max_iter=50,
         tol=1e-5
